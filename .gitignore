@@ -1,0 +1,5 @@
+/.idea
+/cmake-build-debug
+/thirdpart/openal-soft
+/thirdpart/steamaudio
+/bin
