@@ -1,7 +1,9 @@
 ﻿#pragma once
+#include <vector>
+#include <array>
 
 
-namespace RTAudio {
+namespace RTA {
     class IAudioBackend {
     public:
         virtual ~IAudioBackend() = default;
@@ -17,6 +19,10 @@ namespace RTAudio {
         virtual void Pause() = 0;
 
         virtual void Reset() = 0;
+
+        virtual bool LoadDataFromFile(std::string &_path) = 0;
+
+        virtual bool LoadDataFromMem(std::vector<float> &_data) = 0;
     };
 
     class AudioBackendOpenAL : public IAudioBackend {
@@ -40,6 +46,14 @@ namespace RTAudio {
         }
 
         void Reset() override {
+        }
+
+        bool LoadDataFromFile(std::string &_path) override {
+            return true;
+        }
+
+        bool LoadDataFromMem(std::vector<float> &_data) override {
+            return true;
         }
 
     private:
