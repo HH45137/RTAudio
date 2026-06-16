@@ -27,7 +27,7 @@ namespace RTA {
 
         virtual bool LoadDataFromFile(std::string &_path) = 0;
 
-        virtual bool LoadDataFromMem(std::vector<float> &_data) = 0;
+        virtual bool LoadDataFromMem(float *_data, size_t _count, size_t _sample_rate) = 0;
 
         virtual size_t GetDurationInMilliseconds() = 0;
     };
@@ -112,7 +112,7 @@ namespace RTA {
             return true;
         }
 
-        bool LoadDataFromMem(std::vector<float> &_data) override {
+        bool LoadDataFromMem(float *_data, size_t _count, size_t _sample_rate) override {
             return true;
         }
 
