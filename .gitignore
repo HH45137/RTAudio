@@ -2,4 +2,7 @@
 /cmake-build-debug
 /thirdpart/openal-soft
 /thirdpart/steamaudio
-/bin
+bin/*.dll
+bin/*.pdb
+bin/*.ilk
+bin/*.exe
