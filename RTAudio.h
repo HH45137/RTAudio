@@ -70,7 +70,8 @@ namespace RTA {
                 return;
             }
 
-            size_t total_ms = GetDurationInMilliseconds();
+            // 加1秒钟的冗余时间，确保播放完毕
+            size_t total_ms = GetDurationInMilliseconds() + 1000;
             std::cout << "Playing " << total_ms << " milliseconds.\n";
 
             ma_sleep(total_ms);
