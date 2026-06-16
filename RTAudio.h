@@ -11,6 +11,20 @@
 
 
 namespace RTA {
+    struct SoundData {
+        float *data = nullptr;
+        drwav_uint64 total_frames = 0;
+        uint32_t channels = 0;
+        uint32_t sample_rate = 0;
+
+        ~SoundData() {
+            if (data) {
+                drwav_free(data, nullptr);
+                data = nullptr;
+            }
+        }
+    };
+
     class IAudioBackend {
     public:
         virtual ~IAudioBackend() = default;
@@ -27,7 +41,7 @@ namespace RTA {
 
         virtual void Reset() = 0;
 
-        virtual bool LoadDataFromFile(std::string &_path) = 0;
+        virtual bool LoadDataFromFile(const std::string &_path) = 0;
 
         virtual size_t GetDurationInMilliseconds() = 0;
     };
@@ -35,15 +49,11 @@ namespace RTA {
     class RTAudio : public IAudioBackend {
     public:
         ~RTAudio() override {
-            Shutdown();
+            RTAudio::Shutdown();
         }
 
         bool Initialize() override {
             is_playing_finished = false;
-            sample_data = nullptr;
-            this->channels = 0;
-            this->sample_rate = 0;
-            total_frames = 0;
             sample_frame_cursor = 0;
             device_config = {};
             device = {};
@@ -73,12 +83,8 @@ namespace RTA {
                 iplContextRelease(&context);
             }
 
-            if (sample_data != nullptr) {
-                drwav_free(sample_data, nullptr);
-                sample_data = nullptr;
-            }
+            p_sound_resource = nullptr;
 
-            // 释放预分配的中间缓冲区
             if (out_buffer.data) {
                 iplAudioBufferFree(context, &out_buffer);
             }
@@ -91,49 +97,63 @@ namespace RTA {
         }
 
         void Play() override {
-            if (!this->is_ready || sample_data == nullptr) { return; }
-
+            if (!this->is_ready || p_sound_resource == nullptr) {
+                return;
+            }
             if (is_playing_finished) {
                 this->Reset();
             }
-
             if (ma_device_start(&this->device) != MA_SUCCESS) {
                 std::cout << "Failed to start playback device.\n";
-                return;
             }
         }
 
         void Pause() override {
-            if (!this->is_ready || sample_data == nullptr) { return; }
-
+            if (!this->is_ready || p_sound_resource == nullptr) {
+                return;
+            }
             ma_device_stop(&this->device);
         }
 
         void Reset() override {
-            if (!this->is_ready || sample_data == nullptr) { return; }
-
+            if (!this->is_ready || p_sound_resource == nullptr) {
+                return;
+            }
             ma_device_stop(&this->device);
             sample_frame_cursor = 0;
             is_playing_finished = false;
         }
 
-        bool LoadDataFromFile(std::string &_path) override {
-            // 读取 WAV 文件
-            sample_data = drwav_open_file_and_read_pcm_frames_f32(_path.c_str(), &this->channels, &this->sample_rate, &total_frames, nullptr);
-            if (sample_data == nullptr) {
+        // 核心修改：为了不破坏虚函数接口，这里在内部用一个静态 Map 或是单纯的临时加载。
+        // 如果您想实现优雅的多音源，更推荐外部传入 SoundData 指针，这里作为演示演示如何不改接口实现。
+        bool LoadDataFromFile(const std::string &_path) override {
+            // 允许外部加载。为了保证不重复加载浪费内存，可以由外部读完通过别的方法传进来。
+            // 如果这里直接读，我们认为外部保证每个路径对应的 Sound 独立。
+            uint32_t file_channels = 0;
+            uint32_t file_sample_rate = 0;
+            drwav_uint64 file_total_frames = 0;
+
+            float *loaded_data = drwav_open_file_and_read_pcm_frames_f32(_path.c_str(), &file_channels, &file_sample_rate, &file_total_frames, nullptr);
+            if (loaded_data == nullptr) {
                 std::cout << "Error opening and reading WAV file.\n";
                 return false;
             }
 
-            // 强制配置：Steam Audio 空间化最适合单声道输入。
-            // 如果文件是多声道，以下逻辑假设您将其当做单声道处理，或者输出强制为立体声(2声道)。
-            constexpr uint32_t STEAM_AUDIO_FRAME_SIZE = 512; // 推荐使用 512 或 1024
+            // 把数据托管给一个动态分配的结构体（防止多个实例冲突）
+            current_managed_sound = std::make_unique<SoundData>();
+            current_managed_sound->data = loaded_data;
+            current_managed_sound->channels = file_channels;
+            current_managed_sound->sample_rate = file_sample_rate;
+            current_managed_sound->total_frames = file_total_frames;
 
+            // 让当前音源实例指向这块数据资产
+            p_sound_resource = current_managed_sound.get();
+
+            constexpr uint32_t STEAM_AUDIO_FRAME_SIZE = 512;
             device_config = ma_device_config_init(ma_device_type_playback);
             device_config.playback.format = ma_format_f32;
-            device_config.playback.channels = 2; // 空间化后固定输出立体声（双声道）
-            device_config.sampleRate = this->sample_rate;
-            // 强迫 miniaudio 的周期帧长等于 Steam Audio 的块大小
+            device_config.playback.channels = 2; // HRTF 空间化输出固定为立体声双声道
+            device_config.sampleRate = p_sound_resource->sample_rate;
             device_config.periodSizeInFrames = STEAM_AUDIO_FRAME_SIZE;
             device_config.dataCallback = data_callback;
             device_config.pUserData = this;
@@ -143,8 +163,7 @@ namespace RTA {
                 return false;
             }
 
-            // 初始化 Steam Audio 设置
-            audio_settings.samplingRate = static_cast<int32_t>(sample_rate);
+            audio_settings.samplingRate = static_cast<int32_t>(p_sound_resource->sample_rate);
             audio_settings.frameSize = STEAM_AUDIO_FRAME_SIZE;
 
             IPLHRTFSettings hrtfSettings{};
@@ -163,88 +182,75 @@ namespace RTA {
                 return false;
             }
 
-            // 为避免实时线程分配内存，在初始化时提前分配输出 Buffer (立体声 2 通道)
             iplAudioBufferAllocate(context, 2, audio_settings.frameSize, &out_buffer);
-            // 预分配用于提取单声道的输入缓冲区
             mono_input_buffer.resize(STEAM_AUDIO_FRAME_SIZE);
 
             return true;
         }
 
         size_t GetDurationInMilliseconds() override {
-            if (sample_rate == 0) {
+            if (!p_sound_resource || p_sound_resource->sample_rate == 0)
                 return 0;
-            }
-            return (total_frames / sample_rate) * 1000;
+            return (p_sound_resource->total_frames / p_sound_resource->sample_rate) * 1000;
         }
 
     private:
         bool is_ready = false;
         std::atomic<bool> is_playing_finished{false};
 
-        float *sample_data = nullptr;
-        drwav_uint64 total_frames = 0;
-        size_t sample_frame_cursor = 0;
-        uint32_t channels = 0;
-        uint32_t sample_rate = 0;
+        SoundData *p_sound_resource = nullptr;
+        std::unique_ptr<SoundData> current_managed_sound = nullptr; // 用于 LoadDataFromFile 的生命周期持有
+
+        size_t sample_frame_cursor = 0; // 每个实例独享自己的播放游标
 
         ma_device_config device_config = {};
         ma_device device = {};
 
-        // Steam Audio 实例变量
         IPLContext context = nullptr;
         IPLAudioSettings audio_settings{};
         IPLHRTF hrtf = nullptr;
         IPLBinauralEffect effect = nullptr;
 
-        // 预分配的实时缓冲区，防止 Callback 内发生 GC/Malloc 产生杂音
         IPLAudioBuffer out_buffer{};
         std::vector<float> mono_input_buffer;
 
-        // 核心音频处理逻辑
         void ProcessSpatialAudio(float *output_stereo_buffer, size_t frame_count) {
-            if (!effect || frame_count != audio_settings.frameSize) {
+            if (!effect || frame_count != audio_settings.frameSize || !p_sound_resource) {
                 return;
             }
 
-            // 1. 从源音频数据提取单声道数据放入 mono_input_buffer
             for (size_t i = 0; i < frame_count; ++i) {
                 size_t current_frame = sample_frame_cursor + i;
-                if (current_frame < total_frames) {
-                    // 如果原文件是立体声，取左声道作为单声道输入，若是单声道则直接取值
-                    mono_input_buffer[i] = sample_data[current_frame * channels];
+                if (current_frame < p_sound_resource->total_frames) {
+                    // 读取自己对应的独立音频资产
+                    mono_input_buffer[i] = p_sound_resource->data[current_frame * p_sound_resource->channels];
                 } else {
                     mono_input_buffer[i] = 0.0f;
                 }
             }
 
-            // 2. 绑定 Steam Audio 输入结构体
             float *in_data_channels[] = {mono_input_buffer.data()};
             IPLAudioBuffer in_buffer{};
-            in_buffer.numChannels = 1; // 空间化输入固定为 1（单声道）
+            in_buffer.numChannels = 1;
             in_buffer.numSamples = static_cast<int32_t>(frame_count);
             in_buffer.data = in_data_channels;
 
-            // 3. 配置空间参数
+            // 这里每个音源可以配置不同的 3D 朝向！
             IPLBinauralEffectParams effectParams{};
-            effectParams.direction = IPLVector3{1.0f, 0.0f, 1.0f};
+            effectParams.direction = source_direction; // 支持独立 3D 方向
             effectParams.interpolation = IPL_HRTFINTERPOLATION_BILINEAR;
             effectParams.spatialBlend = 1.0f;
             effectParams.hrtf = hrtf;
 
-            // 4. 应用 HRTF 空间化效果（输出到预分配的立体声 out_buffer 中）
             iplBinauralEffectApply(effect, &effectParams, &in_buffer, &out_buffer);
 
-            // 5. 将 Steam Audio 的平铺（Planar）数据交织（Interleave）拷贝回 miniaudio 的立体声输出中
-            // out_buffer.data[0] 是左声道，out_buffer.data[1] 是右声道
             for (size_t i = 0; i < frame_count; ++i) {
                 output_stereo_buffer[i * 2 + 0] = out_buffer.data[0][i];
                 output_stereo_buffer[i * 2 + 1] = out_buffer.data[1][i];
             }
 
-            // 更新游标
             sample_frame_cursor += frame_count;
-            if (sample_frame_cursor >= total_frames) {
+            if (sample_frame_cursor >= p_sound_resource->total_frames) {
                 is_playing_finished = true;
             }
         }
@@ -255,10 +261,11 @@ namespace RTA {
                 memset(_output, 0, _frame_count * _device->playback.channels * sizeof(float));
                 return;
             }
-
-            // 此时由于设置了 periodSizeInFrames，_frame_count 必定等于预设的 512
             this_ptr->ProcessSpatialAudio(static_cast<float *>(_output), _frame_count);
         }
+
+    public:
+        IPLVector3 source_direction = IPLVector3{1.0f, 0.0f, 1.0f};
     };
 
 }
