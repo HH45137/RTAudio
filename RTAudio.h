@@ -64,6 +64,10 @@ namespace RTA {
         void Shutdown() override {
             ma_device_uninit(&this->device);
 
+            iplBinauralEffectRelease(&effect);
+            iplHRTFRelease(&hrtf);
+            iplContextRelease(&context);
+
             if (sample_data != nullptr) {
                 drwav_free(sample_data, nullptr);
                 sample_data = nullptr;
@@ -121,6 +125,29 @@ namespace RTA {
                 return false;
             }
 
+            // HRTF
+            IPLHRTFSettings hrtfSettings{};
+            hrtfSettings.type = IPL_HRTFTYPE_DEFAULT;
+            hrtfSettings.volume = 1.0f;
+
+            // Audio
+            audio_settings.samplingRate = static_cast<int32_t>(sample_rate);
+            audio_settings.frameSize = 480;
+
+            // Create HRTF
+            if (iplHRTFCreate(context, &audio_settings, &hrtfSettings, &hrtf) != IPL_STATUS_SUCCESS) {
+                std::cout << "Failed to create HRTF!\n";
+                return false;
+            }
+
+            // Effect
+            IPLBinauralEffectSettings effectSettings{};
+            effectSettings.hrtf = hrtf;
+            if (iplBinauralEffectCreate(context, &audio_settings, &effectSettings, &effect) != IPL_STATUS_SUCCESS) {
+                std::cout << "Failed to create effect!\n";
+                return false;
+            }
+
             return true;
         }
 
@@ -135,69 +162,58 @@ namespace RTA {
             return (total_sample_data_count / sample_rate) * 1000;
         }
 
-        bool SetAudio(std::vector<float> _audio_buffer, size_t _sample_rate, size_t _frame_size) {
-            // HRTF
-            IPLHRTFSettings hrtfSettings{};
-            hrtfSettings.type = IPL_HRTFTYPE_DEFAULT;
-            hrtfSettings.volume = 1.0f;
-
-            // Audio
-            IPLAudioSettings audioSettings{};
-            audioSettings.samplingRate = static_cast<int32_t>(_sample_rate);
-            audioSettings.frameSize = static_cast<int32_t>(_frame_size);
-
-            // Create HRTF
-            if (iplHRTFCreate(context, &audioSettings, &hrtfSettings, &hrtf) != IPL_STATUS_SUCCESS) {
-                std::cout << "Failed to create HRTF!\n";
-                return false;
-            }
-
-            // Effect
-            IPLBinauralEffectSettings effectSettings{};
-            effectSettings.hrtf = hrtf;
-            if (iplBinauralEffectCreate(context, &audioSettings, &effectSettings, &effect) != IPL_STATUS_SUCCESS) {
-                std::cout << "Failed to create effect!\n";
-                return false;
-            }
-
-            // Audio input buffer
-            float *in_data[] = {_audio_buffer.data()};
-            IPLAudioBuffer in_buffer{};
-            in_buffer.numChannels = 1;
-            in_buffer.numSamples = audioSettings.frameSize;
-            in_buffer.data = in_data;
-
-            // Audio output buffer
-            IPLAudioBuffer out_buffer{};
-            if (iplAudioBufferAllocate(context, 2, audioSettings.frameSize, &out_buffer) != IPL_STATUS_SUCCESS) {
-                std::cout << "Failed to allocate audio output buffer!\n";
-                return false;
-            }
-            std::vector<float> out_data(2 * audioSettings.frameSize);
-
-            return true;
-        }
-
     private:
         static std::atomic<bool> is_playing_finished;
         static float *sample_data;
         static size_t total_sample_data_count;
         static size_t sample_data_cursor;
+        static IPLContext context;
+        static IPLAudioSettings audio_settings;
+        static IPLHRTF hrtf;
+        static IPLBinauralEffect effect;
 
         bool is_ready = false;
         uint32_t channels = 0;
         uint32_t sample_rate = 0;
         ma_device_config device_config = {};
         ma_device device = {};
-        IPLContext context = nullptr;
-        IPLHRTF hrtf = nullptr;
-        IPLBinauralEffect effect = nullptr;
 
         static void Effect(void *_buffer, size_t _size, uint32_t _channels) {
+            if (_channels != 1) {
+                return;
+            }
+
             auto temp_buffer = std::vector<float>(_size);
             memcpy(temp_buffer.data(), _buffer, _size);
             {
-                // SetAudio(temp_buffer, sample_data_cursor, total_sample_data_count);
+                // Audio input buffer
+                float *in_data[] = {temp_buffer.data()};
+                IPLAudioBuffer in_buffer{};
+                in_buffer.numChannels = 1;
+                in_buffer.numSamples = audio_settings.frameSize;
+                in_buffer.data = in_data;
+
+                // Audio output buffer
+                IPLAudioBuffer out_buffer{};
+                if (iplAudioBufferAllocate(context, 2, audio_settings.frameSize, &out_buffer) != IPL_STATUS_SUCCESS) {
+                    std::cout << "Failed to allocate audio output buffer!\n";
+                    return;
+                }
+
+                // Apply effect
+                IPLBinauralEffectParams effectParams{};
+                effectParams.direction = IPLVector3{1.0f, 1.0f, 1.0f};
+                effectParams.interpolation = IPL_HRTFINTERPOLATION_BILINEAR;
+                effectParams.spatialBlend = 1.0f;
+                effectParams.hrtf = hrtf;
+                effectParams.peakDelays = nullptr;
+                iplBinauralEffectApply(effect, &effectParams, &in_buffer, &out_buffer);
+
+                memcpy(temp_buffer.data(), out_buffer.data, _size);
+
+                // iplAudioBufferInterleave(context, &out_buffer, temp_buffer.data());
+
+                iplAudioBufferFree(context, &out_buffer);
             }
             memcpy(_buffer, temp_buffer.data(), _size);
         }
@@ -242,4 +258,8 @@ namespace RTA {
     float *RTAudio::sample_data = nullptr;
     size_t RTAudio::total_sample_data_count{};
     size_t RTAudio::sample_data_cursor{};
+    IPLContext RTAudio::context{};
+    IPLAudioSettings RTAudio::audio_settings{};
+    IPLHRTF RTAudio::hrtf{};
+    IPLBinauralEffect RTAudio::effect{};
 }
