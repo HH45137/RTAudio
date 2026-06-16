@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <vector>
 #include <array>
+#include <atomic>
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
 #define DR_WAV_IMPLEMENTATION
@@ -35,6 +36,7 @@ namespace RTA {
     class AudioBackendMiniAudio : public IAudioBackend {
     public:
         bool Initialize() override {
+            is_playing_finished = false;
             sample_data = nullptr;
             this->channels = 0;
             this->sample_rate = 0;
@@ -65,24 +67,28 @@ namespace RTA {
         void Play() override {
             if (!this->is_ready || sample_data == nullptr) { return; }
 
+            if (is_playing_finished) {
+                this->Reset();
+            }
+
             if (ma_device_start(&this->device) != MA_SUCCESS) {
                 std::cout << "Failed to start playback device.\n";
                 return;
             }
-
-            // 加1秒钟的冗余时间，确保播放完毕
-            size_t total_ms = GetDurationInMilliseconds() + 1000;
-            std::cout << "Playing " << total_ms << " milliseconds.\n";
-
-            ma_sleep(total_ms);
-
-            std::cout << "Play is end!\n";
         }
 
         void Pause() override {
+            if (!this->is_ready || sample_data == nullptr) { return; }
+
+            ma_device_stop(&this->device);
         }
 
         void Reset() override {
+            if (!this->is_ready || sample_data == nullptr) { return; }
+
+            ma_device_stop(&this->device);
+            sample_data_cursor = 0;
+            is_playing_finished = false;
         }
 
         bool LoadDataFromFile(std::string &_path) override {
@@ -119,6 +125,7 @@ namespace RTA {
 
     private:
         bool is_ready = false;
+        static std::atomic<bool> is_playing_finished;
 
         uint32_t channels = 0;
         uint32_t sample_rate = 0;
@@ -154,10 +161,13 @@ namespace RTA {
                 size_t samples_to_zero = samples_to_read - samples_to_copy;
                 float *remaining_output = static_cast<float *>(_output) + samples_to_copy;
                 memset(remaining_output, 0, samples_to_zero * sizeof(float));
+
+                is_playing_finished = true;
             }
         }
     };
 
+    std::atomic<bool> RTA::AudioBackendMiniAudio::is_playing_finished;
     float *RTA::AudioBackendMiniAudio::sample_data = nullptr;
     size_t RTA::AudioBackendMiniAudio::total_sample_data_count{};
     size_t RTA::AudioBackendMiniAudio::sample_data_cursor{};
