@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <vector>
 #include <array>
+#include <miniaudio.h>
 
 
 namespace RTA {
@@ -25,7 +26,7 @@ namespace RTA {
         virtual bool LoadDataFromMem(std::vector<float> &_data) = 0;
     };
 
-    class AudioBackendOpenAL : public IAudioBackend {
+    class AudioBackendMiniAudio : public IAudioBackend {
     public:
         bool Initialize() override {
             is_ready = true;
