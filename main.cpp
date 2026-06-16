@@ -5,13 +5,11 @@
 
 
 int main(int argc, char **argv) {
-    RTA::AudioBackendMiniAudio *audio_backend = new RTA::AudioBackendMiniAudio();
+    auto *audio_backend = new RTA::AudioBackendMiniAudio();
 
     if (!audio_backend->IsReady()) {
         if (!audio_backend->Initialize()) {
-            std::runtime_error("Failed to initialize audio backend");
-            audio_backend->Shutdown();
-            return -1;
+            throw std::runtime_error("Failed to initialize audio backend");
         }
 
         std::cout << "Successd to initialize audio backend\n";

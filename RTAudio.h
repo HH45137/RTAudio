@@ -2,6 +2,8 @@
 #include <vector>
 #include <array>
 #include <miniaudio.h>
+#define DR_WAV_IMPLEMENTATION
+#include <dr_wav.h>
 
 
 namespace RTA {
@@ -29,11 +31,19 @@ namespace RTA {
     class AudioBackendMiniAudio : public IAudioBackend {
     public:
         bool Initialize() override {
+            this->sample_data = nullptr;
+            this->channels = 0;
+            this->sample_rate = 0;
+            this->total_sample_count = 0;
+
             is_ready = true;
             return true;
         }
 
         void Shutdown() override {
+            drwav_free(this->sample_data, nullptr);
+
+            this->is_ready = false;
         }
 
         bool IsReady() override {
@@ -50,6 +60,12 @@ namespace RTA {
         }
 
         bool LoadDataFromFile(std::string &_path) override {
+            drwav_uint64 totalPCMFrameCount;
+            this->sample_data = drwav_open_file_and_read_pcm_frames_f32(_path.c_str(), &this->channels, &this->sample_rate, &this->total_sample_count, nullptr);
+            if (this->sample_data == nullptr) {
+                throw std::runtime_error("Error opening and reading WAV file.");
+            }
+
             return true;
         }
 
@@ -59,6 +75,10 @@ namespace RTA {
 
     private:
         bool is_ready = false;
+        uint32_t channels = 0;
+        uint32_t sample_rate = 0;
+        unsigned long long total_sample_count = 0;
+        float *sample_data = nullptr;
     };
 
     class RTAudio {
