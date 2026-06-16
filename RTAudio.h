@@ -6,6 +6,7 @@
 #include <miniaudio.h>
 #define DR_WAV_IMPLEMENTATION
 #include <dr_wav.h>
+#include <phonon.h>
 
 
 namespace RTA {
@@ -136,6 +137,15 @@ namespace RTA {
         ma_device_config device_config = {};
         ma_device device = {};
 
+        static void Effect(void *_buffer, size_t _size, uint32_t _channels) {
+            auto *temp_buffer = static_cast<float *>(malloc(_size));
+            memcpy(temp_buffer, _buffer, _size);
+            {
+            }
+            memcpy(_buffer, temp_buffer, _size);
+            free(temp_buffer);
+        }
+
         static void data_callback(ma_device *_device, void *_output, const void *_input, ma_uint32 _frame_count) {
             // 1. 明确我们要复制多少个 float 采样
             // 总采样数 = 帧数 * 声道数
@@ -152,7 +162,12 @@ namespace RTA {
             // 3. 复制数据。因为 sample_data 是 float*，sample_data_cursor 是采样数，所以这里的加法是完全正确的。
             // memcpy 的大小是：采样数 * sizeof(float)
             if (samples_to_copy > 0) {
-                memcpy(_output, sample_data + sample_data_cursor, samples_to_copy * sizeof(float));
+                const size_t temp_size = samples_to_copy * sizeof(float);
+                const void *temp_cursor = sample_data + sample_data_cursor;
+                memcpy(_output, temp_cursor, temp_size);
+
+                Effect(_output, temp_size, _device->playback.channels);
+
                 sample_data_cursor += samples_to_copy;
             }
 
@@ -176,14 +191,14 @@ namespace RTA {
     class RTAudio {
     public:
         bool Initialize(IAudioBackend *_audio_backend) {
-            audio_backend = _audio_backend;;
+            IPLContextSettings contextSettings{};
+            contextSettings.version = STEAMAUDIO_VERSION;
 
             is_ready = true;
             return true;
         }
 
         void Shutdown() {
-            audio_backend->Shutdown();
         }
 
         bool IsReady() {
@@ -192,6 +207,5 @@ namespace RTA {
 
     private:
         bool is_ready = false;
-        IAudioBackend *audio_backend = nullptr;
     };
 }
