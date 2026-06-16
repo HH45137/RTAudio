@@ -12,6 +12,7 @@ add_executable(RTAudio main.cpp
 include_directories(${CMAKE_SOURCE_DIR}/thirdpart/steamaudio/include)
 #include_directories(${CMAKE_SOURCE_DIR}/thirdpart/openal-soft/include)
 include_directories(${CMAKE_SOURCE_DIR}/thirdpart/miniaudio)
+include_directories(${CMAKE_SOURCE_DIR}/thirdpart/include)
 
 target_link_libraries(${PROJECT_NAME}
 #        ${CMAKE_SOURCE_DIR}/thirdpart/openal-soft/libs/Win64/OpenAL32.lib
