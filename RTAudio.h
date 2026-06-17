@@ -75,8 +75,8 @@ namespace RTA {
             if (!is_ready) { return; }
 
             ma_device_uninit(&this->device);
-            if (effect) {
-                iplBinauralEffectRelease(&effect);
+            if (bin_effect) {
+                iplBinauralEffectRelease(&bin_effect);
             }
             if (hrtf) {
                 iplHRTFRelease(&hrtf);
@@ -168,19 +168,26 @@ namespace RTA {
             audio_settings.samplingRate = static_cast<int32_t>(p_sound_resource->sample_rate);
             audio_settings.frameSize = STEAM_AUDIO_FRAME_SIZE;
 
-            IPLHRTFSettings hrtfSettings{};
-            hrtfSettings.type = IPL_HRTFTYPE_DEFAULT;
-            hrtfSettings.volume = 1.0f;
+            IPLHRTFSettings hrtf_settings{};
+            hrtf_settings.type = IPL_HRTFTYPE_DEFAULT;
+            hrtf_settings.volume = 1.0f;
 
-            if (iplHRTFCreate(context, &audio_settings, &hrtfSettings, &hrtf) != IPL_STATUS_SUCCESS) {
+            if (iplHRTFCreate(context, &audio_settings, &hrtf_settings, &hrtf) != IPL_STATUS_SUCCESS) {
                 std::cout << "Failed to create HRTF!\n";
                 return false;
             }
 
-            IPLBinauralEffectSettings effectSettings{};
-            effectSettings.hrtf = hrtf;
-            if (iplBinauralEffectCreate(context, &audio_settings, &effectSettings, &effect) != IPL_STATUS_SUCCESS) {
-                std::cout << "Failed to create effect!\n";
+            IPLBinauralEffectSettings bin_effect_settings{};
+            bin_effect_settings.hrtf = hrtf;
+            if (iplBinauralEffectCreate(context, &audio_settings, &bin_effect_settings, &bin_effect) != IPL_STATUS_SUCCESS) {
+                std::cout << "Failed to create binaural effect!\n";
+                return false;
+            }
+
+            IPLDirectEffectSettings dir_effect_settings{};
+            dir_effect_settings.numChannels = 1; // input and output buffers will have 1 channel
+            if (iplDirectEffectCreate(context, &audio_settings, &dir_effect_settings, &direct_effect) != IPL_STATUS_SUCCESS) {
+                std::cout << "Failed to create direct effect!\n";
                 return false;
             }
 
@@ -191,8 +198,9 @@ namespace RTA {
         }
 
         size_t GetDurationInMilliseconds() override {
-            if (!p_sound_resource || p_sound_resource->sample_rate == 0)
+            if (!p_sound_resource || p_sound_resource->sample_rate == 0) {
                 return 0;
+            }
             return (p_sound_resource->total_frames / p_sound_resource->sample_rate) * 1000;
         }
 
@@ -211,13 +219,14 @@ namespace RTA {
         IPLContext context = nullptr;
         IPLAudioSettings audio_settings{};
         IPLHRTF hrtf = nullptr;
-        IPLBinauralEffect effect = nullptr;
+        IPLBinauralEffect bin_effect = nullptr;
+        IPLDirectEffect direct_effect = nullptr;
 
         IPLAudioBuffer out_buffer{};
         std::vector<float> mono_input_buffer;
 
         void ProcessSpatialAudio(float *output_stereo_buffer, size_t frame_count) {
-            if (!effect || frame_count != audio_settings.frameSize || !p_sound_resource) {
+            if (!bin_effect || frame_count != audio_settings.frameSize || !p_sound_resource) {
                 return;
             }
 
@@ -244,7 +253,7 @@ namespace RTA {
             effectParams.spatialBlend = 1.0f;
             effectParams.hrtf = hrtf;
 
-            iplBinauralEffectApply(effect, &effectParams, &in_buffer, &out_buffer);
+            iplBinauralEffectApply(bin_effect, &effectParams, &in_buffer, &out_buffer);
 
             for (size_t i = 0; i < frame_count; ++i) {
                 output_stereo_buffer[i * 2 + 0] = out_buffer.data[0][i];
