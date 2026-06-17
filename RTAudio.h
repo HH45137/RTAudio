@@ -48,15 +48,9 @@ namespace RTA {
 
     class RTAudio : public IAudioBackend {
     public:
-        IPLVector3 source_direction = IPLVector3{1.0f, 0.0f, 1.0f};
+        IPLVector3 source_direction = {1.0f, 0.0f, 1.0f};
         IPLVector3 source_position = {0.0f, 0.0f, 0.0f};
         IPLVector3 listener_position = {0.0f, 0.0f, 0.0f};
-        IPLCoordinateSpace3 source_coordinates{
-                .right = {1.0f, 0.0f, 0.0f},
-                .up = {0.0f, 1.0f, 0.0f},
-                .ahead = {0.0f, 0.0f, -1.0f},
-                .origin = listener_position
-        };
 
         ~RTAudio() override {
             RTAudio::Shutdown();
@@ -232,6 +226,13 @@ namespace RTA {
 
         IPLAudioBuffer out_buffer{};
         std::vector<float> mono_input_buffer;
+
+        IPLCoordinateSpace3 source_coordinates{
+                .right = {1.0f, 0.0f, 0.0f},
+                .up = {0.0f, 1.0f, 0.0f},
+                .ahead = {0.0f, 0.0f, -1.0f},
+                .origin = listener_position
+        };
 
         void ProcessSpatialAudio(float *output_stereo_buffer, size_t frame_count) {
             if (!bin_effect || frame_count != audio_settings.frameSize || !p_sound_resource) {
