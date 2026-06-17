@@ -48,6 +48,8 @@ namespace RTA {
 
     class RTAudio : public IAudioBackend {
     public:
+        IPLVector3 source_direction = IPLVector3{1.0f, 0.0f, 1.0f};
+
         ~RTAudio() override {
             RTAudio::Shutdown();
         }
@@ -263,9 +265,6 @@ namespace RTA {
             }
             this_ptr->ProcessSpatialAudio(static_cast<float *>(_output), _frame_count);
         }
-
-    public:
-        IPLVector3 source_direction = IPLVector3{1.0f, 0.0f, 1.0f};
     };
 
 }
