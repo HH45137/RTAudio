@@ -246,14 +246,32 @@ namespace RTA {
             in_buffer.numSamples = static_cast<int32_t>(frame_count);
             in_buffer.data = in_data_channels;
 
-            // 这里每个音源可以配置不同的 3D 朝向！
-            IPLBinauralEffectParams effectParams{};
-            effectParams.direction = source_direction; // 支持独立 3D 方向
-            effectParams.interpolation = IPL_HRTFINTERPOLATION_BILINEAR;
-            effectParams.spatialBlend = 1.0f;
-            effectParams.hrtf = hrtf;
+            {
+                IPLBinauralEffectParams effect_params{};
+                effect_params.direction = source_direction; // 这里每个音源可以配置不同的 3D 朝向！
+                effect_params.interpolation = IPL_HRTFINTERPOLATION_BILINEAR;
+                effect_params.spatialBlend = 1.0f;
+                effect_params.hrtf = hrtf;
 
-            iplBinauralEffectApply(bin_effect, &effectParams, &in_buffer, &out_buffer);
+                iplBinauralEffectApply(bin_effect, &effect_params, &in_buffer, &out_buffer);
+            }
+
+            {
+                float distance_attenuation = 1.0;
+                {
+                    IPLDistanceAttenuationModel distance_attenuation_model{};
+                    distance_attenuation_model.type = IPL_DISTANCEATTENUATIONTYPE_DEFAULT;
+                    IPLVector3 source_position = this->source_direction;
+                    IPLVector3 listener_position = {0.0f, 0.0f, 0.0f};
+                    distance_attenuation = iplDistanceAttenuationCalculate(context, source_position, listener_position, &distance_attenuation_model);
+                }
+
+                IPLDirectEffectParams direct_effect_params{};
+                direct_effect_params.flags = IPL_DIRECTEFFECTFLAGS_APPLYDISTANCEATTENUATION;
+                direct_effect_params.distanceAttenuation = distance_attenuation;
+
+                iplDirectEffectApply(direct_effect, &direct_effect_params, &in_buffer, &out_buffer);
+            }
 
             for (size_t i = 0; i < frame_count; ++i) {
                 output_stereo_buffer[i * 2 + 0] = out_buffer.data[0][i];
